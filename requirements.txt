@@ -1,0 +1,21 @@
+# Web框架
+fastapi
+uvicorn[standard]
+python-multipart
+
+# 数据处理
+pandas
+openpyxl
+pydantic
+
+# PDF处理
+pdf2image
+Pillow
+
+# HTTP客户端
+requests
+httpx
+
+# 工具库
+tenacity
+python-dotenv
