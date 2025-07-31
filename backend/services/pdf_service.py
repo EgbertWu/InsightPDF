@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 import uuid
 from pdf2image import convert_from_path
 from PIL import Image
@@ -48,12 +48,12 @@ class PDFService:
         logger.info(f"文件已保存: {file_path}, 任务ID: {task_id}")
         return task_id, str(file_path)
     
-    def validate_file(self, file_content: bytes, filename: str) -> bool:
+    def validate_file(self, file_path: str, filename: str) -> bool:
         """
         验证上传的文件
         
         Args:
-            file_content: 文件内容
+            file_path: 文件路径
             filename: 文件名
             
         Returns:
@@ -62,6 +62,13 @@ class PDFService:
         Raises:
             ValueError: 文件验证失败时抛出异常
         """
+        # 读取文件内容进行验证
+        try:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+        except Exception as e:
+            raise ValueError(f"无法读取文件: {str(e)}")
+        
         # 检查文件大小
         if len(file_content) > settings.max_file_size_bytes:
             raise ValueError(f"文件大小超过限制 ({settings.format_file_size(settings.max_file_size_bytes)})")
@@ -132,50 +139,76 @@ class PDFService:
         logger.info(f"页面过滤完成: 总页数 {total_pages}, 跳过 {len(skip_indices)} 页, 待分析 {len(filtered_paths)} 页")
         return filtered_paths
     
-    def convert_pdf_to_images(self, pdf_path: str, task_id: str) -> List[str]:
+    def convert_pdf_to_temp_images(self, pdf_path: str, task_id: str) -> Dict[str, Any]:
         """
-        将PDF转换为图片
+        将PDF转换为临时图片（不进行分析）
         
         Args:
             pdf_path: PDF文件路径
             task_id: 任务ID
             
         Returns:
-            List[str]: 图片文件路径列表
+            Dict[str, Any]: 包含成功状态、图片路径列表和临时目录的字典
             
         Raises:
             Exception: PDF转换失败时抛出异常
         """
         try:
-            # 创建图片输出目录
-            images_dir = self.output_dir / task_id / "images"
-            images_dir.mkdir(parents=True, exist_ok=True)
+            # 创建临时图片目录
+            temp_dir = Path(settings.upload_dir) / "temp" / task_id
+            temp_dir.mkdir(parents=True, exist_ok=True)
             
             # 转换PDF为图片
-            logger.info(f"开始转换PDF: {pdf_path}")
+            logger.info(f"开始转换PDF到临时目录: {pdf_path}")
             pages = convert_from_path(
                 pdf_path,
-                dpi=300,  # 高分辨率，便于OCR识别
+                dpi=300,  # 高分辨率
                 fmt='PNG'
             )
             
             image_paths = []
             for i, page in enumerate(pages, 1):
-                image_path = images_dir / f"page_{i:03d}.png"
+                image_path = temp_dir / f"page_{i:03d}.png"
                 page.save(image_path, 'PNG')
                 image_paths.append(str(image_path))
-                logger.debug(f"页面 {i} 已转换: {image_path}")
+                logger.debug(f"页面 {i} 已转换到临时目录: {image_path}")
             
-            logger.info(f"PDF转换完成，共 {len(image_paths)} 页")
-            
-            # 应用页面过滤
-            filtered_paths = self.filter_pages_for_analysis(image_paths, len(image_paths))
-            
-            return filtered_paths
+            logger.info(f"PDF转换完成，共 {len(image_paths)} 页，临时目录: {temp_dir}")
+            return {
+                "success": True,
+                "image_paths": image_paths,
+                "temp_dir": str(temp_dir)  # 改为 temp_dir
+            }
             
         except Exception as e:
             logger.error(f"PDF转换失败: {str(e)}")
-            raise Exception(f"PDF转换失败: {str(e)}")
+            return {
+                "success": False,
+                "error": f"PDF转换失败: {str(e)}",
+                "image_paths": [],
+                "output_dir": ""
+            }
+    
+    def cleanup_temp_images(self, task_id: str) -> bool:
+        """
+        清理临时图像文件
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            bool: 清理是否成功
+        """
+        try:
+            temp_dir = Path(settings.upload_dir) / "temp" / task_id
+            if temp_dir.exists():
+                import shutil
+                shutil.rmtree(temp_dir)
+                logger.info(f"临时目录已清理: {temp_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"清理临时目录失败: {str(e)}")
+            return False
     
     def get_pdf_info(self, pdf_path: str) -> dict:
         """

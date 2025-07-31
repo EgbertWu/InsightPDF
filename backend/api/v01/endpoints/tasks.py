@@ -109,7 +109,8 @@ async def list_tasks(
         List[TaskInfo]: 任务信息列表
     """
     try:
-        tasks = task_service.list_tasks(limit)
+        # 修复：明确指定参数名
+        tasks = task_service.list_tasks(limit=limit)
         return tasks
         
     except Exception as e:

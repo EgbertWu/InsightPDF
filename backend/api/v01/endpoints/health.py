@@ -25,7 +25,9 @@ async def health_check():
         output_dir_exists = os.path.exists(settings.output_dir)
         
         # 检查任务服务状态
-        task_count = len(task_service.tasks)
+        upload_task_count = len(task_service.upload_tasks)
+        analysis_task_count = len(task_service.analysis_tasks)
+        total_task_count = upload_task_count + analysis_task_count
         
         # 检查配置
         config_status = {
@@ -34,7 +36,10 @@ async def health_check():
             "output_dir": settings.output_dir,
             "output_dir_exists": output_dir_exists,
             "max_file_size": settings.format_file_size(settings.max_file_size_bytes),
-            "api_timeout": f"{settings.api_timeout_seconds}秒"
+            "api_timeout": f"{settings.api_timeout_seconds}秒",
+            "upload_tasks": upload_task_count,
+            "analysis_tasks": analysis_task_count,
+            "total_tasks": total_task_count
         }
         
         # 检查大模型配置
@@ -67,13 +72,13 @@ async def health_check():
             timestamp=datetime.now(),
             version="1.0.0",
             uptime="运行中",
-            task_count=task_count,
+            task_count=total_task_count,  # 修改：使用 total_task_count 替代 task_count
             config=config_status,
             llm_providers=llm_config
         )
         
     except Exception as e:
-        logger.error(f"健康检查失败: {str(e)}", exc_info=True)
+        logger.error(f"健康检查失败: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"健康检查失败: {str(e)}"

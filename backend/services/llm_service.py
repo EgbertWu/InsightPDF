@@ -52,7 +52,12 @@ class LLMService:
         default_prompt = f"""
 你是一个专业的应用题识别和分析专家。请仔细分析这张图片中的应用题内容。
 
-**重要要求：你必须严格按照JSON格式返回结果，不要添加任何其他文字说明。**
+**关键要求：**
+1. 必须用中文回答
+2. 必须严格按照JSON格式返回结果
+3. 不要添加任何markdown代码块标记
+4. 不要添加任何解释文字
+5. 直接返回纯JSON格式
 
 分析要求：
 1. 识别图片中的所有应用题，按顺序编号
@@ -63,8 +68,7 @@ class LLMService:
 6. 评估题目难度（easy/medium/hard）
 7. 给出识别置信度（0-1之间的小数）
 
-**输出格式：请严格按照以下JSON格式返回，不要包含markdown代码块标记：**
-
+**输出格式示例（必须严格遵循）：**
 {{
   "questions": [
     {{
@@ -81,9 +85,10 @@ class LLMService:
 }}
 
 注意：
-- 如果图片中没有应用题，返回空的questions数组：{{"questions": []}}
+- 如果图片中没有应用题，返回：{{"questions": []}}
 - 如果某些信息不确定，可以设置为空字符串
-- 必须返回有效的JSON格式，不要添加任何解释文字
+- 必须返回有效的JSON格式
+- 必须用中文描述题目内容和解析
 """
         return default_prompt
     
@@ -174,6 +179,10 @@ class LLMService:
             "model": config["model"],
             "messages": [
                 {
+                    "role": "system",
+                    "content": "你是一个专业的中文应用题识别专家。请始终用中文回答，并严格按照JSON格式返回结果。"
+                },
+                {
                     "role": "user",
                     "content": [
                         {
@@ -190,7 +199,8 @@ class LLMService:
                 }
             ],
             "max_tokens": 4000,
-            "temperature": 0.1
+            "temperature": 0,  # 改为0以获得更确定的输出
+            "response_format": {"type": "json_object"}  # 强制JSON格式
         }
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
