@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # 通义千问配置
     qwen_api_key: Optional[str] = None
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    qwen_model: str = "qwen-vl-plus"
+    qwen_model: str = "qwen-vl-max"
     
     # API配置
     api_timeout_seconds: int = 300  # API超时时间（秒）

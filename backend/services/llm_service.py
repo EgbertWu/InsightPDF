@@ -48,48 +48,33 @@ class LLMService:
         """
         if custom_prompt:
             return custom_prompt
-        
-        default_prompt = f"""
-你是一个专业的应用题识别和分析专家。请仔细分析这张图片中的应用题内容。
-
-**关键要求：**
-1. 必须用中文回答
-2. 必须严格按照JSON格式返回结果
-3. 不要添加任何markdown代码块标记
-4. 不要添加任何解释文字
-5. 直接返回纯JSON格式
-
-分析要求：
-1. 识别图片中的所有应用题，按顺序编号
-2. 完整提取每道题的题目内容
-3. 如果图片中包含答案，请提取答案
-4. 如果有解题过程或解析，请提取解析
-5. 分析每道题涉及的知识点
-6. 评估题目难度（easy/medium/hard）
-7. 给出识别置信度（0-1之间的小数）
-
-**输出格式示例（必须严格遵循）：**
-{{
-  "questions": [
-    {{
-      "id": 1,
-      "content": "题目内容",
-      "answer": "答案（如果有）",
-      "explanation": "解析（如果有）",
-      "knowledge_points": ["考点1", "考点2"],
-      "difficulty": "medium",
-      "confidence": 0.95,
-      "source": "{filename}"
-    }}
-  ]
-}}
-
-注意：
-- 如果图片中没有应用题，返回：{{"questions": []}}
-- 如果某些信息不确定，可以设置为空字符串
-- 必须返回有效的JSON格式
-- 必须用中文描述题目内容和解析
-"""
+        default_prompt = f""" 你是一个专业的应用题识别和分析专家。请仔细分析这张图片中的应用题内容。
+        **重要：你必须严格按照以下要求回答：**
+        1. 只能用中文回答
+        2. 只能返回JSON格式，不要任何其他内容
+        3. 不要返回markdown代码块
+        4. 不要返回文本提取结果
+        5. 必须分析题目内容，不是提取文字
+        **如果图片中有应用题，按以下JSON格式返回：**
+        {{
+          "questions": [
+            {{
+              "id": 1,
+                "content": "完整的题目内容",
+                "answer": "答案（推理得到答案）",
+                "explanation": "解析（详细解析题目，给出推理过程）",
+                "knowledge_points": ["知识点1", "知识点2"],
+                "difficulty": "easy",
+                "confidence": 0.9,
+                "source": "{filename}"
+            }}
+          ]
+        }}
+        **如果图片中没有应用题，返回：**
+        {{"questions": []}}
+        请开始分析图片中的应用题：
+      """
+            
         return default_prompt
     
     @retry(
@@ -240,10 +225,49 @@ class LLMService:
                 content = response["choices"][0]["message"]["content"]
             elif provider == LLMProvider.QWEN:
                 response = await self.call_qwen_api(image_base64, prompt)
-                # 修复：通义千问现在使用 OpenAI 兼容格式
-                content = response["choices"][0]["message"]["content"]
+                
+                # 增强的响应格式检查
+                logger.debug(f"通义千问API原始响应类型: {type(response)}")
+                logger.debug(f"通义千问API原始响应: {response}")
+                
+                # 检查响应格式
+                if isinstance(response, list):
+                    # 如果返回的是列表，说明是OCR结果，不是我们要的题目分析
+                    logger.warning("API返回OCR文本提取结果而非题目分析，跳过此图片")
+                    return []
+                elif isinstance(response, dict):
+                    if "choices" in response and len(response["choices"]) > 0:
+                        # 标准OpenAI格式
+                        choice = response["choices"][0]
+                        if isinstance(choice, dict) and "message" in choice:
+                            content = choice["message"]["content"]
+                        else:
+                            logger.error(f"意外的choice格式: {choice}")
+                            return []
+                    elif "output" in response:
+                        # 通义千问原生格式
+                        content = response["output"].get("text", "")
+                    elif "text" in response:
+                        # 简化格式
+                        content = response["text"]
+                    else:
+                        logger.error(f"无法识别的响应格式: {list(response.keys())}")
+                        return []
+                else:
+                    logger.error(f"意外的响应类型: {type(response)}")
+                    return []
             else:
                 raise ValueError(f"不支持的大模型提供商: {provider}")
+            
+            # 检查内容是否为空
+            if not content or not content.strip():
+                logger.warning("API返回空内容")
+                return []
+            
+            # 检查是否是OCR文本提取结果（包含start_char, end_char等字段）
+            if "start_char" in content or "end_char" in content or "text_content" in content:
+                logger.warning("检测到OCR文本提取结果，跳过此图片")
+                return []
             
             # 解析返回的JSON内容
             import json
@@ -266,19 +290,89 @@ class LLMService:
                             lines = lines[:-1]
                         cleaned_content = '\n'.join(lines).strip()
                 
+                # 再次检查是否是OCR结果
+                if cleaned_content.startswith('[') and '"start_char"' in cleaned_content:
+                    logger.warning("清理后仍然是OCR文本提取结果，跳过此图片")
+                    return []
+                
                 # 解析清理后的JSON内容
                 result = json.loads(cleaned_content)
-                questions_data = result.get("questions", [])
+                
+                # 检查结果格式
+                if isinstance(result, list):
+                    # 如果结果是列表，检查是否是OCR结果
+                    if result and isinstance(result[0], dict) and "start_char" in result[0]:
+                        logger.warning("解析结果是OCR文本提取，跳过此图片")
+                        return []
+                    else:
+                        # 可能是题目列表，尝试转换
+                        logger.warning("API返回题目列表而非标准格式，尝试转换")
+                        questions_data = result
+                elif isinstance(result, dict):
+                    questions_data = result.get("questions", [])
+                else:
+                    logger.error(f"无法识别的JSON结果类型: {type(result)}")
+                    return []
                 
                 # 转换为Question对象
                 questions = []
-                for q_data in questions_data:
-                    # 确保source字段正确设置
-                    if "source" not in q_data or not q_data["source"]:
-                        q_data["source"] = filename
-                    
-                    question = Question(**q_data)
-                    questions.append(question)
+                for i, q_data in enumerate(questions_data, 1):
+                    try:
+                        # 数据格式标准化处理
+                        standardized_data = {}
+                        
+                        # 处理ID字段
+                        if "id" in q_data:
+                            standardized_data["id"] = q_data["id"]
+                        elif "question_id" in q_data:
+                            standardized_data["id"] = int(q_data["question_id"]) if str(q_data["question_id"]).isdigit() else i
+                        else:
+                            standardized_data["id"] = i
+                        
+                        # 处理content字段 - 增加中文字段支持
+                        if "content" in q_data:
+                            standardized_data["content"] = q_data["content"]
+                        elif "text" in q_data:
+                            standardized_data["content"] = q_data["text"]
+                        elif "question" in q_data:
+                            standardized_data["content"] = q_data["question"]
+                        elif "题目内容" in q_data:  # 新增中文字段支持
+                            standardized_data["content"] = q_data["题目内容"]
+                        elif "题目" in q_data:  # 新增中文字段支持
+                            standardized_data["content"] = q_data["题目"]
+                        elif "问题" in q_data:  # 新增中文字段支持
+                            standardized_data["content"] = q_data["问题"]
+                        else:
+                            # 如果没有明确的题目内容，跳过这个数据
+                            logger.warning(f"跳过无题目内容的数据: {q_data}")
+                            continue
+                        
+                        # 处理类型字段 - 增加中文字段支持
+                        question_type = q_data.get("type") or q_data.get("题目类型") or q_data.get("类型") or "应用题"
+                        
+                        # 处理其他字段，设置默认值
+                        standardized_data["answer"] = q_data.get("answer") or q_data.get("答案") or ""
+                        standardized_data["explanation"] = q_data.get("explanation") or q_data.get("解释") or q_data.get("解答过程") or ""
+                        standardized_data["knowledge_points"] = q_data.get("knowledge_points") or q_data.get("知识点") or []
+                        
+                        # 处理difficulty字段
+                        difficulty = q_data.get("difficulty", "medium")
+                        if difficulty not in ["easy", "medium", "hard"]:
+                            difficulty = "medium"
+                        standardized_data["difficulty"] = difficulty
+                        
+                        standardized_data["confidence"] = float(q_data.get("confidence", 0.8))
+                        
+                        # 确保source字段正确设置
+                        standardized_data["source"] = q_data.get("source", filename)
+                        
+                        # 创建Question对象
+                        question = Question(**standardized_data)
+                        questions.append(question)
+                        
+                    except Exception as e:
+                        logger.warning(f"跳过无效题目数据: {q_data}, 错误: {str(e)}")
+                        continue
                 
                 logger.info(f"成功识别 {len(questions)} 道应用题")
                 return questions
@@ -291,4 +385,5 @@ class LLMService:
                 
         except Exception as e:
             logger.error(f"图片分析失败: {str(e)}")
-            raise Exception(f"图片分析失败: {str(e)}")
+            # 不再抛出异常，而是返回空列表，让批处理继续
+            return []

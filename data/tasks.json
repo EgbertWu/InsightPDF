@@ -578,7 +578,30 @@
       "output_format": "json",
       "total_questions": null,
       "processed_images": null
+    },
+    "237dd49f-24c1-4192-aca6-590989bca0a1": {
+      "task_id": "237dd49f-24c1-4192-aca6-590989bca0a1",
+      "task_type": "image_analysis",
+      "user_id": null,
+      "status": "pending",
+      "created_at": "2025-08-01 11:14:14.086979",
+      "updated_at": "2025-08-01 11:14:14.086982",
+      "completed_at": null,
+      "error_message": null,
+      "progress": null,
+      "name": "test111",
+      "description": "test111",
+      "source_upload_task_id": "bdb78b9c-2cd3-43b6-84d4-9e36f0faff26",
+      "image_paths": [
+        "uploads/temp/bdb78b9c-2cd3-43b6-84d4-9e36f0faff26/page_008.png"
+      ],
+      "provider": "qwen",
+      "extract_answers": true,
+      "extract_knowledge_points": true,
+      "output_format": "json",
+      "total_questions": null,
+      "processed_images": null
     }
   },
-  "saved_at": "2025-07-31T22:09:29.562244"
+  "saved_at": "2025-08-01T11:14:14.087019"
 }
